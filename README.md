@@ -16,7 +16,7 @@ In modern educational environments, teachers distribute subject-based content (l
 |------------|-------|
 | Node.js | Runtime |
 | Express.js | Web Framework |
-| PostgreSQL (Neon) | Database |
+| PostgreSQL (Neon) | Cloud Database |
 | JWT | Authentication |
 | bcrypt | Password Hashing |
 | Multer | File Upload |
@@ -30,7 +30,7 @@ In modern educational environments, teachers distribute subject-based content (l
 |------|-------------|
 | Principal | View all content, approve/reject content |
 | Teacher | Upload content, view own content status |
-| Student | Hit public API to see live content (no login) |
+| Student | Hit public API to see live content (no login needed) |
 
 ---
 
@@ -43,6 +43,7 @@ uploaded → pending → approved / rejected
 - If rejected → rejection reason is stored and visible to teacher
 - If approved → content shown only within scheduled time window
 - Without start_time/end_time → content never shown to students
+- Only PENDING content can be approved or rejected
 
 ---
 
@@ -81,6 +82,28 @@ npm start      # production
 ```
 
 Server runs on: `http://localhost:3000`
+
+---
+
+## Database
+
+This project uses **Neon** (Cloud PostgreSQL) for database hosting.
+
+### Option 1 — Use Neon (Recommended)
+1. Go to https://neon.tech
+2. Create free account
+3. Create new project
+4. Copy connection string
+5. Paste in .env as DATABASE_URL
+
+### Option 2 — Use Local PostgreSQL
+1. Install PostgreSQL locally
+2. Create database: `content_broadcasting`
+3. Update .env with local credentials:
+```
+DATABASE_URL=postgresql://postgres:password@localhost:5432/content_broadcasting
+```
+4. Run: `node setup-db.js`
 
 ---
 
@@ -138,9 +161,14 @@ Server runs on: `http://localhost:3000`
 
 Example:
 ```
-Maths: Paper A (5min) → Paper B (5min) → loops
+Maths:   Paper A (5min) → Paper B (5min) → loops
 Science: Q1 (3min) → Q2 (3min) → Q3 (3min) → loops
+
 Both run at the same time independently!
+
+At 10:07 AM:
+Maths   → shows Paper B (7 min into 10 min cycle)
+Science → shows Q3 (7 min into 9 min cycle)
 ```
 
 ---
@@ -152,9 +180,12 @@ Both run at the same time independently!
 | No approved content | "No content available" |
 | Approved but outside time window | "No content available" |
 | Invalid teacher ID | "No content available" |
-| Pending/rejected content | Never shown to students |
+| Pending content | Never shown to students |
+| Rejected content | Never shown to students |
 | Already approved → approve again | Error message |
 | Already rejected → reject again | Error message |
+| Approved → reject | Error message |
+| Rejected → approve | Error message |
 
 ---
 
@@ -172,9 +203,11 @@ Import `postman-collection.json` in Postman to test all APIs.
 
 ## Assumptions
 
+- Database hosted on **Neon** (Cloud PostgreSQL) for easy deployment
 - `start_time` and `end_time` are full datetime values (e.g. 2026-04-28T10:00:00)
 - Content without `start_time`/`end_time` will never be shown to students
 - Default rotation duration is 5 minutes if not provided
 - Subject names are stored in lowercase for consistency
 - Invalid teacher ID returns "No content available" (not 404 error)
 - Only PENDING content can be approved or rejected
+- Timestamps stored in UTC in PostgreSQL (IST = UTC + 5:30)
