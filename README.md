@@ -93,3 +93,27 @@ duration     - optional (minutes per rotation, default: 5)
 - Default rotation duration is 5 minutes if not provided
 - Subject names are stored in lowercase
 - Invalid teacher ID returns "No content available" (not 404)
+
+## API Documentation
+
+Import the `postman-collection.json` file in Postman to test all APIs.
+
+### Steps to Import:
+1. Open Postman
+2. Click "Import" button
+3. Select `postman-collection.json` from project folder
+4. All APIs will be loaded automatically
+
+### API Endpoints Summary:
+
+| Method | Route | Role | Description |
+|--------|-------|------|-------------|
+| POST | /auth/register | Public | Register user |
+| POST | /auth/login | Public | Login user |
+| POST | /content/upload | Teacher | Upload content |
+| GET | /content/my | Teacher | View own content |
+| GET | /approval/all | Principal | View all content |
+| GET | /approval/pending | Principal | View pending content |
+| PATCH | /approval/:id/approve | Principal | Approve content |
+| PATCH | /approval/:id/reject | Principal | Reject content |
+| GET | /content/live/:teacherId | Public | Get live content |
