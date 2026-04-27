@@ -1,129 +1,228 @@
 ================================================
-CONTENT BROADCASTING SYSTEM - ARCHITECTURE NOTES
+CONTENT BROADCASTING SYSTEM
+Architecture Notes
 ================================================
 
 1. AUTHENTICATION & RBAC FLOW
 -------------------------------
-- JWT (JSON Web Token) based authentication
-- On login, server generates a token containing: userId, email, role
-- Token is sent in Authorization header as: Bearer <token>
-- authMiddleware verifies token on every protected route
-- roleMiddleware checks role: isPrincipal or isTeacher
-- Principal and Teacher permissions are strictly separated
-- Public routes (student broadcast) require NO authentication
+JWT (JSON Web Token) based authentication is used.
 
 Flow:
-  POST /auth/login → verify email+password → generate JWT
-  Protected request → authMiddleware → roleMiddleware → controller
+  POST /auth/login
+  → verify email + password using bcrypt
+  → generate JWT token (contains: userId, email, role)
+  → client sends token in every request as:
+     Authorization: Bearer <token>
+  → authMiddleware verifies token
+  → roleMiddleware checks role (principal/teacher)
+  → controller handles request
+
+Role Separation:
+  - Principal → can only access /approval routes
+  - Teacher   → can only access /content routes
+  - Student   → hits public /content/live route (no auth)
+
+Middleware Chain:
+  Request → authMiddleware → roleMiddleware → Controller
+
 
 2. SUBJECT-BASED SYSTEM DESIGN
 --------------------------------
-- Each teacher can upload content for multiple subjects (Maths, Science, etc.)
-- content_slots table creates one slot per teacher per subject
-  (UNIQUE constraint on teacher_id + subject)
-- content_schedule table assigns rotation_order and duration to each content
-- Each subject rotates independently - Maths timer ≠ Science timer
-- When student hits /content/live/:teacherId, system runs rotation
-  for ALL subjects of that teacher and returns 1 active content per subject
+Each teacher can upload content for multiple subjects.
+Each subject has its own independent rotation slot.
+
+Tables involved:
+  content_slots    → one slot per teacher per subject
+                     UNIQUE(teacher_id, subject)
+  content_schedule → rotation order and duration per content
+
+Example:
+  Teacher Rahul uploads:
+  - Maths Paper 1, Maths Paper 2 → goes into Maths slot
+  - Science Q1, Science Q2       → goes into Science slot
+
+  content_slots:
+  id | teacher_id | subject
+  1  | 2          | maths
+  2  | 2          | science
+
+  content_schedule:
+  id | content_id | slot_id | rotation_order | duration
+  1  | 1          | 1       | 1              | 5
+  2  | 2          | 1       | 2              | 5
+  3  | 3          | 2       | 1              | 5
+  4  | 4          | 2       | 2              | 5
+
 
 3. UPLOAD HANDLING APPROACH
 -----------------------------
-- Multer middleware handles multipart/form-data file uploads
-- Allowed formats: JPG, PNG, GIF only (validated by mimetype)
-- Max file size: 10MB (enforced by multer limits)
+- Multer middleware handles multipart/form-data uploads
+- File validation: only JPG, PNG, GIF allowed (by mimetype)
+- File size limit: 10MB enforced by multer
 - Files stored locally in /uploads directory
-- Unique filename generated using timestamp + random number
-- File accessible via static route: GET /uploads/filename.jpg
+- Unique filename: timestamp + random number
+- File accessible via: GET /uploads/filename.jpg
 - file_url stored in DB as /uploads/filename.jpg
+
 
 4. APPROVAL WORKFLOW DESIGN
 -----------------------------
 Content Lifecycle:
   uploaded → pending → approved / rejected
 
-- Teacher uploads → status automatically set to 'pending'
-- Only principal can approve or reject
-- Rejection MUST include a reason (validated)
-- approved_by and approved_at stored when action taken
-- Only 'approved' content is eligible for broadcasting
-- Even approved content must be within time window to show
+Rules:
+  - Teacher uploads → status automatically set to 'pending'
+  - Only PRINCIPAL can approve or reject
+  - Only PENDING content can be approved or rejected
+  - Already approved content CANNOT be rejected
+  - Already rejected content CANNOT be approved
+  - Rejection MUST include a reason (validated)
+  - approved_by and approved_at stored on action
+  - Only 'approved' content is eligible for broadcasting
+  - Even approved content must be within time window
 
-5. SCHEDULING / ROTATION LOGIC (VERY IMPORTANT)
+
+5. SCHEDULING / ROTATION LOGIC (MOST IMPORTANT)
 -------------------------------------------------
 Algorithm:
-  Step 1: Get all approved content for teacher with start/end time
+
+  Step 1: Get all approved content for teacher
+          (must have start_time and end_time)
+
   Step 2: Group content by subject
-  Step 3: For each subject:
-    a. Filter contents where now >= start_time AND now <= end_time
-    b. Calculate total cycle = sum of all durations (in ms)
-    c. Find reference start = earliest start_time in active contents
-    d. elapsed = now - reference_start
-    e. position = elapsed % total_cycle
-    f. Loop through contents accumulating duration until position < cumulative
-    g. That content is currently active
+          grouped = {
+            maths:   [Paper A, Paper B, Paper C],
+            science: [Q1, Q2, Q3]
+          }
+
+  Step 3: For each subject independently:
+    a. Filter: now >= start_time AND now <= end_time
+    b. totalCycle = sum of all durations in milliseconds
+    c. referenceStart = earliest start_time
+    d. elapsed = now - referenceStart
+    e. position = elapsed % totalCycle
+    f. Loop through contents accumulating duration
+       until position < cumulative → that is active content
+
+  Step 4: Return 1 active content per subject
 
 Example:
   Maths: A(5min), B(5min), C(5min) → total = 15min
-  elapsed = 23min → 23%15 = 8min → falls in B range (5-9) → show B
+  elapsed = 23min → 23%15 = 8min
+  A covers 0-4, B covers 5-9, C covers 10-14
+  8 falls in B range → show Paper B
 
   Science: X(3min), Y(3min) → total = 6min
-  elapsed = 23min → 23%6 = 5min → falls in Y range (3-5) → show Y
+  elapsed = 23min → 23%6 = 5min
+  X covers 0-2, Y covers 3-5
+  5 falls in Y range → show Y
 
-  Maths and Science rotate completely independently!
+  Maths and Science rotate COMPLETELY INDEPENDENTLY!
 
-6. DATABASE DESIGN DECISIONS
-------------------------------
-Tables:
-  users          - stores both principals and teachers (role field)
-  content        - main content table with status lifecycle
-  content_slots  - groups content by subject per teacher (1 slot per subject)
-  content_schedule - rotation order and duration per content
 
-Key decisions:
-  - UNIQUE(teacher_id, subject) in content_slots prevents duplicates
-  - ON DELETE CASCADE ensures cleanup when content/user deleted
-  - Indexes on commonly queried fields (status, subject, uploaded_by)
-  - start_time/end_time stored as TIMESTAMP for precise time comparison
+6. DATABASE DESIGN
+-------------------
+4 Tables:
+
+  users
+  → stores both principals and teachers
+  → role field: 'principal' or 'teacher'
+
+  content
+  → main content table
+  → status lifecycle: pending → approved/rejected
+  → start_time, end_time for scheduling
+  → uploaded_by → references users
+
+  content_slots
+  → groups content by subject per teacher
+  → UNIQUE(teacher_id, subject) prevents duplicates
+  → one slot per teacher per subject
+
+  content_schedule
+  → defines rotation order and duration
+  → links content to slot
+  → rotation_order determines sequence
+
+Key Decisions:
+  - UNIQUE constraint prevents duplicate slots
+  - ON DELETE CASCADE cleans up related data
+  - Indexes on status, subject, uploaded_by for performance
+  - Timestamps stored as UTC in PostgreSQL
+
 
 7. FOLDER STRUCTURE
 --------------------
-src/
-  controllers/   - Handle HTTP request/response, call services
-  routes/        - Define API endpoints and attach middleware
-  services/      - Core business logic (pure functions)
-  middlewares/   - JWT auth, role checking
-  models/        - (DB queries abstracted in services for simplicity)
-  utils/         - File upload config, response helpers
-  config/        - DB connection, SQL schema
+content-broadcasting-system/
+├── src/
+│   ├── app.js               ← Express app entry point
+│   ├── config/
+│   │   ├── db.js            ← PostgreSQL connection
+│   │   └── schema.sql       ← Database schema
+│   ├── controllers/         ← Handle req/res
+│   │   ├── authController.js
+│   │   ├── contentController.js
+│   │   ├── approvalController.js
+│   │   └── broadcastController.js
+│   ├── routes/              ← API endpoints
+│   │   ├── authRoutes.js
+│   │   ├── contentRoutes.js
+│   │   ├── approvalRoutes.js
+│   │   └── broadcastRoutes.js
+│   ├── services/            ← Business logic
+│   │   ├── authService.js
+│   │   ├── contentService.js
+│   │   ├── approvalService.js
+│   │   └── schedulingService.js
+│   ├── middlewares/         ← JWT + RBAC
+│   │   ├── authMiddleware.js
+│   │   └── roleMiddleware.js
+│   ├── models/              ← Database queries
+│   │   ├── userModel.js
+│   │   └── contentModel.js
+│   └── utils/               ← Helpers
+│       ├── fileUpload.js
+│       └── responseHelper.js
+├── uploads/                 ← Uploaded files
+├── setup-db.js              ← DB setup script
+├── architecture-notes.txt   ← This file
+├── .env.example             ← Environment template
+├── package.json
+└── README.md
+
 
 8. MIDDLEWARE USAGE
 --------------------
-- cors()              - Allow cross-origin requests
-- express.json()      - Parse JSON request body
-- authMiddleware      - Verify JWT on protected routes
-- roleMiddleware      - Check principal/teacher role
-- multer (upload)     - Handle file uploads
-- express.static      - Serve uploaded files
+cors()           → Allow cross-origin requests
+express.json()   → Parse JSON request body
+authMiddleware   → Verify JWT token
+roleMiddleware   → Check principal/teacher role
+multer           → Handle file uploads
+express.static   → Serve uploaded files
+
 
 9. SCALABILITY APPROACH
 ------------------------
-Current implementation (MVP):
-  - Local file storage (can be migrated to S3)
-  - Direct DB queries (can add connection pooling)
-  - Stateless JWT (horizontally scalable)
+Current (MVP):
+  - Local file storage → can migrate to AWS S3
+  - Stateless JWT → horizontally scalable
+  - Connection pooling via pg Pool
 
-Bonus/Future improvements:
-  - Redis caching for /content/live API (reduce DB load)
+Future improvements:
+  - Redis caching for /content/live (reduce DB load)
   - Rate limiting on public API (prevent abuse)
-  - S3 for file storage (scalable, CDN-ready)
-  - Queue system (Bull/Redis) for approval notifications
+  - AWS S3 for file storage (scalable + CDN)
+  - Bull/Redis queue for approval notifications
   - Pagination for content listing APIs
+
 
 10. ASSUMPTIONS
 ----------------
-- start_time and end_time are full datetime values (e.g. 2026-04-28T10:00:00)
-- Content without start_time/end_time is never shown to students
-- Default rotation duration is 5 minutes if not provided
-- Invalid teacherId returns "No content available" (not 404 error)
-- subject names are stored in lowercase for consistency
+- start_time/end_time are full datetime values
+- Content without start_time/end_time is never shown
+- Default rotation duration is 5 minutes
+- Invalid teacherId returns empty response (not 404)
+- Subject names stored in lowercase
+- Only PENDING content can be approved or rejected
+
 ================================================
