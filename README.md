@@ -189,16 +189,6 @@ Science → shows Q3 (7 min into 9 min cycle)
 
 ---
 
-## API Documentation
-
-Import `postman-collection.json` in Postman to test all APIs.
-
-### Steps to Import:
-1. Open Postman
-2. Click "Import" button
-3. Select `postman-collection.json` from project folder
-4. All APIs will be loaded with descriptions
-
 ---
 
 ## Assumptions
@@ -211,3 +201,28 @@ Import `postman-collection.json` in Postman to test all APIs.
 - Invalid teacher ID returns "No content available" (not 404 error)
 - Only PENDING content can be approved or rejected
 - Timestamps stored in UTC in PostgreSQL (IST = UTC + 5:30)
+
+
+## API Documentation
+
+Import the `postman-collection.json` file in Postman to test all APIs.
+
+### Steps to Import:
+1. Open Postman
+2. Click "Import" button
+3. Select `postman-collection.json` from project folder
+4. All APIs will be loaded automatically
+
+### API Endpoints Summary:
+
+| Method | Route | Role | Description |
+|--------|-------|------|-------------|
+| POST | /auth/register | Public | Register user |
+| POST | /auth/login | Public | Login user |
+| POST | /content/upload | Teacher | Upload content |
+| GET | /content/my | Teacher | View own content |
+| GET | /approval/all | Principal | View all content |
+| GET | /approval/pending | Principal | View pending content |
+| PATCH | /approval/:id/approve | Principal | Approve content |
+| PATCH | /approval/:id/reject | Principal | Reject content |
+| GET | /content/live/:teacherId | Public | Get live content |
